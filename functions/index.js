@@ -26,10 +26,20 @@ exports.changeUserAdminStatus = functions.https.onCall((data, context) => {
     throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
     'while authenticated.');
   }
+  //Preventing accidental mistakes
+  if (context.auth.uid === data.userId) {
+    throw new functions.https.HttpsError('failed-precondition', 'Un administrateur ne peut se révoquer ses droits !');
+  }
   admin.auth().getUser(context.auth.uid).then((user) => {
       if(user.customClaims.admin){
-          return admin.auth().setCustomUserClaims(data.userId, { admin: data.adminStatus, role: data.role});
-      }
+        admin.auth().getUser(data.userId).then((userTarget) => {
+        if(userTarget.customClaims){
+          return admin.auth().setCustomUserClaims(data.userId, { admin: !userTarget.customClaims.admin, role: 'new'});
+        } else {
+            return admin.auth().setCustomUserClaims(data.userId, { admin: false, role: 'new'});
+          }
+      });
+    }
   });
 });
 
@@ -56,3 +66,12 @@ exports.getUserAdminStatus = functions.https.onCall((data, context) => {
     });
   });
   
+exports.getAllUsers = functions.https.onCall((data, context) => {
+  if(!data.page) {
+    throw new functions.https.HttpsError('failed-precondition', 'The function must be called ' +
+      'with page value.');
+  }
+  return admin.auth().listUsers(100, data.page).then((userList) => {
+    return {...userList.users};
+  });
+});
