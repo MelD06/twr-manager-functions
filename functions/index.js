@@ -12,37 +12,31 @@ admin.initializeApp(functions.config().firebase);
  * Parses a query result for a
  * given collection of files
  * hasPower describes administrative
- * powers, if isRecuded is set to true
+ * powers, if isShort is set to true
  * function will return a short summary
  */
 
+const parseFileSummary = (queryResult, hasPower, isShort) => {
+  const fileList = [];  
+  queryResult.forEach(doc => {
 
-const parseFileSummary = (queryResult, hasPower, isReduced) => {
-  const fileList = [];
-  queryResult.forEach((doc) => {
-    admin.auth().getUser(doc.data().info.student).then((student) => {
-      const userName = student.displayName;
-      const info = doc.data().info;
-      info.student = userName;
-      if(isReduced){
-        fileList.push({
-          id: doc.id,
-          info: info,
-          genComment: doc.data().sections[0].comment
-        });
-      } else {
+    if(isShort){
       fileList.push({
         id: doc.id,
-        info: info,
+        info: doc.data().info,
+        genComment: doc.data().sections[0].comment
+      });
+               
+    } else {
+      fileList.push({
+        id: doc.id,
+        info: doc.data().info,
         sections: doc.data().sections
       });
-    }
-    })
-    })
-  return { hasPower: hasPower, files: fileList };
-}
-
-
+      }
+    });
+    return { hasPower: hasPower, files: fileList };
+};
 
 //This function set attributes for a newly created user
 exports.doNewUserPopulate = functions.auth.user().onCreate(user => {
@@ -75,12 +69,10 @@ exports.changeUserAdminStatus = functions.https.onCall((data, context) => {
     if (user.customClaims.admin) {
       admin.auth().getUser(data.userId).then(userTarget => {
         if (userTarget.customClaims) {
-          return admin
-            .auth()
-            .setCustomUserClaims(data.userId, {
-              admin: data.newAdminStatus,
-              role: data.newRole
-            });
+          return admin.auth().setCustomUserClaims(data.userId, {
+            admin: data.newAdminStatus,
+            role: data.newRole
+          });
         } else {
           return admin
             .auth()
@@ -136,21 +128,26 @@ exports.getAllUsers = functions.https.onCall((data, context) => {
 });
 
 exports.getStudents = functions.https.onCall((data, context) => {
-  return admin.auth().getUser(context.auth.uid).then(thisUser => {
-    const userClaims = thisUser.customClaims;
-    if (!context.auth || !userClaims) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "The function must be called " + "while authenticated."
-      );
-    }
-    if (!userClaims.admin || userClaims.role === "student") {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "Access Denied."
-      );
-    }
-    return admin.auth().listUsers(100).then(userList => {
+  return admin
+    .auth()
+    .getUser(context.auth.uid)
+    .then(thisUser => {
+      const userClaims = thisUser.customClaims;
+      if (!context.auth || !userClaims) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "The function must be called " + "while authenticated."
+        );
+      }
+      if (!userClaims.admin || userClaims.role === "student") {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Access Denied."
+        );
+      }
+      return admin.auth().listUsers(100);
+    })
+    .then(userList => {
       return userList.users
         .map(user => {
           if (user.customClaims.role === "student") {
@@ -163,23 +160,23 @@ exports.getStudents = functions.https.onCall((data, context) => {
         })
         .filter(el => el != null);
     });
-  });
 });
 
-exports.getFileList = functions.https.onCall((data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      "failed-precondition",
-      "The function must be called " + "while authenticated."
-    );
-  }
-  return admin.auth().getUser(context.auth.uid).then(curUser => {
+exports.getFileList = functions.https
+  .onCall((data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "The function must be called " + "while authenticated."
+      );
+    }
+    return admin.auth().getUser(context.auth.uid).then(curUser => {
     const hasPower =
       curUser.customClaims.admin ||
       curUser.customClaims.role === "admin" ||
       curUser.customClaims.role === "instructor";
     if (hasPower && data) {
-      if(!data.user){
+      if (!data.user) {
         throw new functions.https.HttpsError(
           "failed-precondition",
           "[getFileList] Requires user id as param 'user'."
@@ -189,29 +186,29 @@ exports.getFileList = functions.https.onCall((data, context) => {
         .firestore()
         .collection("files")
         .where("user", "==", data.user)
-        .orderBy('info.date', 'desc')
-        .then(files => {
-          return parseFileSummary(files, hasPower, true);
+        .orderBy("info.date", "desc")
+        .get().then(res => {
+          return parseFileSummary(res, hasPower, true);
         })
-        .catch(err => {
-          throw new functions.https.HttpsError(
-            "failed-precondition",
-            "Invalid User ID."
-          );
-        });
+        .catch(err => console.log(err));;
     } else if (hasPower) {
-      return admin.firestore().collection("files").orderBy('info.date', 'desc').get().then(files => {
-        return parseFileSummary(files, hasPower, true);
-      }).catch(err => ['No Data']);
+      return admin
+        .firestore()
+        .collection("files")
+        .orderBy("info.date", "desc")
+        .get().then(res => {
+          return parseFileSummary(res, hasPower, true);
+        })
+        .catch(err => console.log(err));
     } else {
       return admin
         .firestore()
         .collection("files")
         .where("user", "==", context.auth.uid)
-        .get()
-        .then(files => {
-          return parseFileSummary(files, hasPower, true);
-        }).catch((err) => (console.log('No Data')));
+        .get().then(res => {
+          return parseFileSummary(res, hasPower, true);
+        })
+        .catch(err => console.log(err));
     }
   });
 });
