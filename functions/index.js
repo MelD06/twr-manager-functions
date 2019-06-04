@@ -17,25 +17,23 @@ admin.initializeApp(functions.config().firebase);
  */
 
 const parseFileSummary = (queryResult, hasPower, isShort) => {
-  const fileList = [];  
+  const fileList = [];
   queryResult.forEach(doc => {
-
-    if(isShort){
+    if (isShort) {
       fileList.push({
         id: doc.id,
         info: doc.data().info,
         genComment: doc.data().sections[0].comment
       });
-               
     } else {
       fileList.push({
         id: doc.id,
         info: doc.data().info,
         sections: doc.data().sections
       });
-      }
-    });
-    return { hasPower: hasPower, files: fileList };
+    }
+  });
+  return { hasPower: hasPower, files: fileList };
 };
 
 //This function set attributes for a newly created user
@@ -59,26 +57,42 @@ exports.changeUserAdminStatus = functions.https.onCall((data, context) => {
     );
   }
   //Preventing accidental mistakes
-  if (context.auth.uid === data.userId) {
+  if (context.auth.uid === data && data.adminStatus === false) {
     throw new functions.https.HttpsError(
       "failed-precondition",
       "Un administrateur ne peut se révoquer ses droits !"
     );
   }
-  admin.auth().getUser(context.auth.uid).then(user => {
-    if (user.customClaims.admin) {
-      admin.auth().getUser(data.userId).then(userTarget => {
-        if (userTarget.customClaims) {
-          return admin.auth().setCustomUserClaims(data.userId, {
-            admin: data.newAdminStatus,
-            role: data.newRole
-          });
-        } else {
-          return admin
-            .auth()
-            .setCustomUserClaims(data.userId, { admin: false, role: "new" });
-        }
-      });
+  return admin.auth().getUser(context.auth.uid).then(user => {
+    if (user.customClaims.admin === true) {
+      admin
+        .auth()
+        .getUser(data.userId)
+        .then(userTarget => {
+          if (userTarget.customClaims) {
+            admin.auth().setCustomUserClaims(data.userId, {
+              admin: data.newAdminStatus,
+              role: data.newRole
+            });
+            return true;
+          } else {
+            throw new functions.https.HttpsError(
+              "failed-precondition",
+              "Missing arguments"
+            );
+          }
+        })
+        .catch(err => {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "Bad User ID"
+          );
+        });
+    } else {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Unauthorized."
+      );
     }
   });
 });
@@ -93,7 +107,7 @@ exports.getUserAdminStatus = functions.https.onCall((data, context) => {
     );
   }
   return admin.auth().getUser(context.auth.uid).then(user => {
-    if (user.customClaims.admin) {
+    if (user.customClaims.admin === true) {
       admin
         .auth()
         .getUser(data.userId)
@@ -122,8 +136,17 @@ exports.getAllUsers = functions.https.onCall((data, context) => {
       "The function must be called " + "with page value."
     );
   }
-  return admin.auth().listUsers(100, data.page).then(userList => {
-    return { ...userList.users };
+  return admin.auth().getUser(context.auth.uid).then(user => {
+    if (user.customClaims.admin) {
+      return admin.auth().listUsers(100, data.page).then(userList => {
+        return { ...userList.users };
+      });
+    } else {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Unauthorized."
+      );
+    }
   });
 });
 
@@ -162,15 +185,14 @@ exports.getStudents = functions.https.onCall((data, context) => {
     });
 });
 
-exports.getFileList = functions.https
-  .onCall((data, context) => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "The function must be called " + "while authenticated."
-      );
-    }
-    return admin.auth().getUser(context.auth.uid).then(curUser => {
+exports.getFileList = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "The function must be called " + "while authenticated."
+    );
+  }
+  return admin.auth().getUser(context.auth.uid).then(curUser => {
     const hasPower =
       curUser.customClaims.admin ||
       curUser.customClaims.role === "admin" ||
@@ -185,18 +207,20 @@ exports.getFileList = functions.https
       return admin
         .firestore()
         .collection("files")
-        .where("user", "==", data.user)
+        .where("info.student", "==", data.user)
         .orderBy("info.date", "desc")
-        .get().then(res => {
+        .get()
+        .then(res => {
           return parseFileSummary(res, hasPower, true);
         })
-        .catch(err => console.log(err));;
+        .catch(err => console.log(err));
     } else if (hasPower) {
       return admin
         .firestore()
         .collection("files")
         .orderBy("info.date", "desc")
-        .get().then(res => {
+        .get()
+        .then(res => {
           return parseFileSummary(res, hasPower, true);
         })
         .catch(err => console.log(err));
@@ -205,7 +229,8 @@ exports.getFileList = functions.https
         .firestore()
         .collection("files")
         .where("user", "==", context.auth.uid)
-        .get().then(res => {
+        .get()
+        .then(res => {
           return parseFileSummary(res, hasPower, true);
         })
         .catch(err => console.log(err));
