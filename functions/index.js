@@ -16,7 +16,7 @@ admin.initializeApp(functions.config().firebase);
  * function will return a short summary
  */
 
-const parseFileSummary = (queryResult, hasPower, isShort) => {
+const parseFileSummary = (queryResult, userRole, isShort) => {
   const fileList = [];
   queryResult.forEach(doc => {
     if (isShort) {
@@ -33,7 +33,7 @@ const parseFileSummary = (queryResult, hasPower, isShort) => {
       });
     }
   });
-  return { hasPower: hasPower, files: fileList };
+  return { userRole: userRole, files: fileList };
 };
 
 //This function set attributes for a newly created user
@@ -197,43 +197,76 @@ exports.getFileList = functions.https.onCall((data, context) => {
       curUser.customClaims.admin ||
       curUser.customClaims.role === "admin" ||
       curUser.customClaims.role === "instructor";
-    if (hasPower && data) {
-      if (!data.user) {
-        throw new functions.https.HttpsError(
-          "failed-precondition",
-          "[getFileList] Requires user id as param 'user'."
-        );
-      }
+    if (hasPower && data != null) {
       return admin
         .firestore()
         .collection("files")
         .where("info.student", "==", data.user)
-        .orderBy("info.date", "desc")
         .get()
         .then(res => {
-          return parseFileSummary(res, hasPower, true);
+          return parseFileSummary(res, curUser.customClaims.role, true);
         })
         .catch(err => console.log(err));
     } else if (hasPower) {
       return admin
         .firestore()
         .collection("files")
-        .orderBy("info.date", "desc")
         .get()
         .then(res => {
-          return parseFileSummary(res, hasPower, true);
+          return parseFileSummary(res, curUser.customClaims.role, true);
         })
         .catch(err => console.log(err));
     } else {
       return admin
         .firestore()
         .collection("files")
-        .where("user", "==", context.auth.uid)
+        .where("info.student", "==", curUser.email)
         .get()
         .then(res => {
-          return parseFileSummary(res, hasPower, true);
+          return parseFileSummary(res, curUser.customClaims.role, true);
         })
         .catch(err => console.log(err));
     }
+  });
+});
+
+
+exports.getFile = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "The function must be called " + "while authenticated."
+    );
+  }
+  if(!data){
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "The function must be called with 'file'"
+    );
+  }
+  return admin.auth().getUser(context.auth.uid).then(curUser => {
+    const hasPower =
+      curUser.customClaims.admin ||
+      curUser.customClaims.role === "admin" ||
+      curUser.customClaims.role === "instructor";
+      return admin
+        .firestore()
+        .collection("files")
+        .doc(data.file)
+        .get()
+        .then(res => res.data())
+        .then(file => {
+          if(hasPower || file.info.student === curUser.email){
+            return file
+          } else {
+            throw new functions.https.HttpsError(
+              "failed-precondition",
+              "Unauthorized"
+            );
+          }
+        })
+        .catch(err => console.log(err));
+
+
   });
 });
