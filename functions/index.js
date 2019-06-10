@@ -270,3 +270,23 @@ exports.getFile = functions.https.onCall((data, context) => {
 
   });
 });
+
+exports.emailToName = functions.https.onCall((data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "The function must be called " + "while authenticated."
+    );
+  }
+  // Any authenticated user can use this function, protecting
+  // user's mail address is not considered a security matter.
+  return admin.auth().getUserByEmail(data.email).then(user => user.displayName).catch(err => {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Cannot find user with email " + data.email
+    );
+  });
+
+
+
+});
